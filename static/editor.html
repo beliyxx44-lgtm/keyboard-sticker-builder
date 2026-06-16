@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Редактор трафаретов</title>
+    <style>
+        :root { --bg: #2b2b2b; --panel: #3c3c3c; --text: #ddd; --accent: #4a90d9; }
+        body { margin: 0; font-family: system-ui; background: var(--bg); color: var(--text); display: flex; height: 100vh; touch-action: manipulation; }
+        .sidebar { width: 300px; background: var(--panel); padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+        .sidebar label { font-size: 14px; margin-bottom: 2px; }
+        .sidebar select, .sidebar input, .sidebar button { padding: 8px; border: none; border-radius: 5px; background: #555; color: white; }
+        .sidebar button { background: var(--accent); cursor: pointer; font-weight: bold; }
+        .main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: auto; padding: 20px; }
+        canvas { border: 1px solid #555; border-radius: 8px; background: #1e1e1e; max-width: 100%; max-height: 100%; touch-action: none; }
+        .zoom-controls { display: flex; gap: 10px; align-items: center; }
+        .zoom-controls button { padding: 5px 10px; min-width: 40px; }
+        #zoomValue { min-width: 50px; text-align: center; }
+        input[type="range"] { width: 100%; }
+        .section-title { font-size: 16px; font-weight: bold; margin-top: 8px; border-top: 1px solid #555; padding-top: 8px; }
+        .key-edit { display: flex; flex-direction: column; gap: 5px; margin-top: 5px; }
+        .key-edit input { width: 80px; }
+        .grid-dims { display: flex; gap: 5px; align-items: center; }
+        .grid-dims input { width: 70px; }
+        .spacer-btn { position: relative; }
+        .spacer-btn .hotkey { font-size: 10px; color: #888; display: block; line-height: 1; }
+    </style>
+</head>
+<body>
+<div class="sidebar">
+    <h2>🖊️ Редактор трафаретов</h2>
+    <a href="/" style="color: var(--accent); text-decoration: none;">← Вернуться в конструктор</a>
+
+    <div class="section-title">Инструменты</div>
+    <button id="addKeyBtn">Добавить клавишу (N)</button>
+    <label>Ширина (мм): <input type="number" id="newKeyWidth" value="19.05" step="0.1" min="1"></label>
+    <label>Высота (мм): <input type="number" id="newKeyHeight" value="19.05" step="0.1" min="1"></label>
+
+    <label>Отступы:</label>
+    <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+        <button class="spacer-preset spacer-btn" data-w="2" data-h="19.05">2 мм<span class="hotkey">1</span></button>
+        <button class="spacer-preset spacer-btn" data-w="5" data-h="19.05">5 мм<span class="hotkey">2</span></button>
+        <button class="spacer-preset spacer-btn" data-w="7" data-h="19.05">7 мм<span class="hotkey">3</span></button>
+        <button class="spacer-preset spacer-btn" data-w="8" data-h="19.05">8 мм<span class="hotkey">4</span></button>
+        <button class="spacer-preset spacer-btn" data-w="13" data-h="19.05">13 мм<span class="hotkey">5</span></button>
+        <button class="spacer-preset spacer-btn" data-w="3.5" data-h="19.05">3.5 мм<span class="hotkey">6</span></button>
+        <button class="spacer-preset" data-w="custom" data-h="custom">Свой (0)</button>
+    </div>
+    <div id="customSpacerSize" style="display:none;">
+        <label>Ширина (мм): <input type="number" id="customSpacerWidth" value="10" step="0.5" min="1"></label>
+        <label>Высота (мм): <input type="number" id="customSpacerHeight" value="19.05" step="0.5" min="1"></label>
+        <button id="applyCustomSpacer">Применить свой отступ</button>
+    </div>
+    <button id="addSpacerBtn" style="display:none;">Кликните на поле для отступа</button>
+
+    <div class="section-title">Сетка и привязка</div>
+    <label><input type="checkbox" id="gridToggle"> Показать сетку (G)</label>
+    <div class="grid-dims">
+        <label>Шаг X (мм):</label>
+        <input type="number" id="gridStepX" value="19.05" step="0.5" min="1">
+    </div>
+    <div class="grid-dims">
+        <label>Шаг Y (мм):</label>
+        <input type="number" id="gridStepY" value="19.05" step="0.5" min="1">
+    </div>
+    <label><input type="checkbox" id="snapGridToggle"> Привязка к сетке (H)</label>
+    <label><input type="checkbox" id="snapObjToggle" checked> Привязка к клавишам</label>
+    <label>Порог привязки (мм): <input type="number" id="snapThreshold" value="1.5" step="0.1" min="0.5"></label>
+
+    <div class="section-title">📷 Фоновое изображение</div>
+    <button id="loadBgImageBtn">Загрузить фото</button>
+    <button id="clearBgImageBtn" disabled>Очистить</button>
+    <label>Прозрачность: <input type="range" id="bgOpacity" min="0" max="100" value="50" step="5"> <span id="bgOpacityVal">50%</span></label>
+
+    <div class="section-title">Выделенная клавиша</div>
+    <div id="selectionInfo" style="color: #aaa;">Нет выделения</div>
+    <div class="key-edit">
+        <label>X (мм): <input type="number" id="editKeyX" step="0.1"></label>
+        <label>Y (мм): <input type="number" id="editKeyY" step="0.1"></label>
+        <label>Ширина (мм): <input type="number" id="editKeyW" step="0.1" min="1"></label>
+        <label>Высота (мм): <input type="number" id="editKeyH" step="0.1" min="1"></label>
+        <button id="applyKeyEdit">Применить изменения</button>
+        <button id="deleteSelectedKeyBtn" disabled>Удалить клавишу (Del)</button>
+    </div>
+
+    <div class="section-title">Действия</div>
+    <button id="undoBtn" disabled>↩️ Отменить (Ctrl+Z)</button>
+    <button id="redoBtn" disabled>↪️ Повторить (Ctrl+Y)</button>
+
+    <div class="section-title">Раскладка</div>
+    <button id="saveLayoutBtn">Сохранить раскладку (Ctrl+S)</button>
+    <button id="loadLayoutBtn">Загрузить раскладку</button>
+    <select id="savedLayoutsSelect"><option>-- выберите --</option></select>
+
+    <div class="zoom-controls">
+        <button id="zoomOut" title="Уменьшить">−</button>
+        <span id="zoomValue">100%</span>
+        <button id="zoomIn" title="Увеличить">+</button>
+    </div>
+
+    <div style="margin-top:10px; color:#888; font-size:12px;">
+        Горячие клавиши:<br>
+        N – новая клавиша<br>
+        Delete – удалить выделенные<br>
+        Esc – отменить выделение/режим<br>
+        Стрелки – двигать выделенные<br>
+        Shift+Click – множественное выделение<br>
+        Ctrl+C / Ctrl+V – копировать/вставить<br>
+        Ctrl+Z – отменить, Ctrl+Y – повторить<br>
+        Ctrl+S – сохранить<br>
+        G – сетка, H – привязка к сетке<br>
+        1-6 – отступы 2/5/7/8/13/3.5 мм<br>
+        0 – свой отступ
+    </div>
+</div>
+<div class="main">
+    <canvas id="editorCanvas"></canvas>
+</div>
+
+<script>
+    const canvas = document.getElementById('editorCanvas');
+    const ctx = canvas.getContext('2d');
+    const BASE_SCALE = 3;
+
+    let keys = [];
+    let selectedKeyIds = new Set();
+    let zoomLevel = 1.0;
+
+    let addingKey = false;
+    let addingSpacer = false;
+    let newKeyWidthMM = 19.05;
+    let newKeyHeightMM = 19.05;
+
+    let showGrid = false;
+    let gridStepXMM = 19.05;
+    let gridStepYMM = 19.05;
+    let snapToGrid = false;
+    let snapToObjects = true;
+    let snapThresholdMM = 1.5;
+
+    let dragInfo = null;
+    let guideLines = [];
+    let hasMoved = false;
+
+    let bgImage = null;
+    let bgImageOpacity = 0.5;
+    let clipboard = [];
+
+    const MAX_HISTORY = 50;
+    let historyUndo = [];
+    let historyRedo = [];
+
+    function generateNewKeyId() {
+        const maxId = keys.reduce((max, k) => (!k.isSpacer && k.id > max) ? k.id : max, 0);
+        return maxId + 1;
+    }
+    function generateNewSpacerId() {
+        const minId = keys.reduce((min, k) => (k.isSpacer && k.id < min) ? k.id : min, 0);
+        return minId - 1;
+    }
+    function normalizeSpacerIds() {
+        let spacerCounter = -1;
+        for (let k of keys) {
+            if (k.isSpacer) {
+                if (k.id >= 0) k.id = spacerCounter--;
+                else if (k.id < spacerCounter) spacerCounter = k.id;
+            }
+        }
+    }
+
+    function mouseToMm(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const mouseX = (clientX - rect.left) * scaleX;
+        const mouseY = (clientY - rect.top) * scaleY;
+
+        let minX = 0, minY = 0;
+        if (keys.length > 0) {
+            minX = Math.min(...keys.map(k => k.x));
+            minY = Math.min(...keys.map(k => k.y));
+        }
+        const offX = (-minX + 10) * BASE_SCALE * zoomLevel;
+        const offY = (-minY + 10) * BASE_SCALE * zoomLevel;
+
+        return {
+            mmX: (mouseX - offX) / (BASE_SCALE * zoomLevel),
+            mmY: (mouseY - offY) / (BASE_SCALE * zoomLevel)
+        };
+    }
+
+    function findKeyByMm(mmX, mmY) {
+        for (let i = keys.length - 1; i >= 0; i--) {
+            const k = keys[i];
+            if (mmX >= k.x && mmX <= k.x + k.w && mmY >= k.y && mmY <= k.y + k.h) return k.id;
+        }
+        return null;
+    }
+
+    function computeSnapGuides(draggingKey, proposedX, proposedY) {
+        if (!snapToObjects) return { finalX: proposedX, finalY: proposedY, guides: [] };
+        const threshold = snapThresholdMM;
+        const others = keys.filter(k => k.id !== draggingKey.id);
+        let finalX = proposedX, finalY = proposedY;
+        let bestDx = Infinity, bestDy = Infinity;
+
+        const dragLeft = proposedX;
+        const dragRight = proposedX + draggingKey.w;
+        const dragTop = proposedY;
+        const dragBottom = proposedY + draggingKey.h;
+        const dragCenterX = proposedX + draggingKey.w / 2;
+        const dragCenterY = proposedY + draggingKey.h / 2;
+
+        for (const o of others) {
+            const oLeft = o.x, oRight = o.x + o.w, oTop = o.y, oBottom = o.y + o.h;
+            const oCenterX = o.x + o.w / 2, oCenterY = o.y + o.h / 2;
+
+            const dxPairs = [
+                [dragLeft, oLeft], [dragRight, oRight], [dragLeft, oRight], [dragRight, oLeft],
+                [dragCenterX, oCenterX], [dragLeft, oCenterX], [dragRight, oCenterX],
+                [dragCenterX, oLeft], [dragCenterX, oRight]
+            ];
+            for (const [drag, target] of dxPairs) {
+                const dist = Math.abs(drag - target);
+                if (dist < threshold && dist < bestDx) {
+                    bestDx = dist;
+                    finalX = proposedX + (target - drag);
+                }
+            }
+
+            const dyPairs = [
+                [dragTop, oTop], [dragBottom, oBottom], [dragTop, oBottom], [dragBottom, oTop],
+                [dragCenterY, oCenterY], [dragTop, oCenterY], [dragBottom, oCenterY],
+                [dragCenterY, oTop], [dragCenterY, oBottom]
+            ];
+            for (const [drag, target] of dyPairs) {
+                const dist = Math.abs(drag - target);
+                if (dist < threshold && dist < bestDy) {
+                    bestDy = dist;
+                    finalY = proposedY + (target - drag);
+                }
+            }
+        }
+
+        const guides = [];
+        if (bestDx < threshold) guides.push({ axis: 'x', posMm: finalX - proposedX + dragLeft });
+        if (bestDy < threshold) guides.push({ axis: 'y', posMm: finalY - proposedY + dragTop });
+        return { finalX, finalY, guides };
+    }
+
+    function snapToGridXY(x, y) {
+        if (!snapToGrid) return { x, y };
+        let snappedX = x, snappedY = y;
+        if (gridStepXMM > 0) snappedX = Math.round(x / gridStepXMM) * gridStepXMM;
+        if (gridStepYMM > 0) snappedY = Math.round(y / gridStepYMM) * gridStepYMM;
+        return { x: snappedX, y: snappedY };
+    }
+
+    function snapSizeToGrid(w, h) {
+        if (!snapToGrid) return { w, h };
+        let snappedW = w, snappedH = h;
+        if (gridStepXMM > 0) snappedW = Math.round(w / gridStepXMM) * gridStepXMM;
+        if (gridStepYMM > 0) snappedH = Math.round(h / gridStepYMM) * gridStepYMM;
+        return { w: Math.max(1, snappedW), h: Math.max(1, snappedH) };
+    }
+
+    function drawCanvas() {
+        if (keys.length === 0) {
+            canvas.width = 500; canvas.height = 300;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            return;
+        }
+        const minX = Math.min(...keys.map(k => k.x));
+        const minY = Math.min(...keys.map(k => k.y));
+        const maxX = Math.max(...keys.map(k => k.x + k.w));
+        const maxY = Math.max(...keys.map(k => k.y + k.h));
+        const totalW_mm = maxX - minX + 20;
+        const totalH_mm = maxY - minY + 20;
+
+        canvas.width = totalW_mm * BASE_SCALE * zoomLevel;
+        canvas.height = totalH_mm * BASE_SCALE * zoomLevel;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (bgImage && bgImage.complete) {
+            ctx.save();
+            ctx.globalAlpha = bgImageOpacity;
+            ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
+        }
+
+        ctx.save();
+        ctx.translate((-minX + 10) * BASE_SCALE * zoomLevel, (-minY + 10) * BASE_SCALE * zoomLevel);
+
+        if (showGrid && (gridStepXMM > 0 || gridStepYMM > 0)) {
+            ctx.save();
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 0.5;
+            const startX = Math.floor((-minX) / gridStepXMM) * gridStepXMM;
+            const startY = Math.floor((-minY) / gridStepYMM) * gridStepYMM;
+            const endX = maxX + 10, endY = maxY + 10;
+            if (gridStepXMM > 0) {
+                for (let mx = startX; mx <= endX; mx += gridStepXMM) {
+                    ctx.beginPath();
+                    ctx.moveTo(mx * BASE_SCALE * zoomLevel, startY * BASE_SCALE * zoomLevel);
+                    ctx.lineTo(mx * BASE_SCALE * zoomLevel, endY * BASE_SCALE * zoomLevel);
+                    ctx.stroke();
+                }
+            }
+            if (gridStepYMM > 0) {
+                for (let my = startY; my <= endY; my += gridStepYMM) {
+                    ctx.beginPath();
+                    ctx.moveTo(startX * BASE_SCALE * zoomLevel, my * BASE_SCALE * zoomLevel);
+                    ctx.lineTo(endX * BASE_SCALE * zoomLevel, my * BASE_SCALE * zoomLevel);
+                    ctx.stroke();
+                }
+            }
+            ctx.restore();
+        }
+
+        for (let k of keys) {
+            const x = k.x * BASE_SCALE * zoomLevel;
+            const y = k.y * BASE_SCALE * zoomLevel;
+            const w = k.w * BASE_SCALE * zoomLevel;
+            const h = k.h * BASE_SCALE * zoomLevel;
+            const radius = 4 * zoomLevel;
+            const isSelected = selectedKeyIds.has(k.id);
+
+            if (k.isSpacer) {
+                ctx.save();
+                ctx.strokeStyle = isSelected ? '#ff0000' : '#999';
+                ctx.lineWidth = Math.max(1, zoomLevel);
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.roundRect(x, y, w, h, radius);
+                ctx.stroke();
+                ctx.restore();
+                if (isSelected) {
+                    const sz = 6 * zoomLevel;
+                    ctx.fillStyle = '#ff0000';
+                    ctx.fillRect(x - sz/2, y - sz/2, sz, sz);
+                    ctx.fillRect(x + w - sz/2, y - sz/2, sz, sz);
+                    ctx.fillRect(x - sz/2, y + h - sz/2, sz, sz);
+                    ctx.fillRect(x + w - sz/2, y + h - sz/2, sz, sz);
+                }
+                continue;
+            }
+
+            ctx.fillStyle = 'rgba(255,255,255,0.05)';
+            ctx.fillRect(x, y, w, h);
+            ctx.strokeStyle = isSelected ? '#ff0000' : '#aaa';
+            ctx.lineWidth = isSelected ? Math.max(2, zoomLevel * 2) : Math.max(1, zoomLevel);
+            ctx.beginPath();
+            ctx.roundRect(x, y, w, h, radius);
+            ctx.stroke();
+            ctx.fillStyle = '#ccc';
+            ctx.font = `${Math.max(10, 12 * zoomLevel)}px sans-serif`;
+            ctx.fillText(k.id, x + 3, y + 12 * zoomLevel);
+            if (isSelected) {
+                const sz = 6 * zoomLevel;
+                ctx.fillStyle = '#ff0000';
+                ctx.fillRect(x - sz/2, y - sz/2, sz, sz);
+                ctx.fillRect(x + w - sz/2, y - sz/2, sz, sz);
+                ctx.fillRect(x - sz/2, y + h - sz/2, sz, sz);
+                ctx.fillRect(x + w - sz/2, y + h - sz/2, sz, sz);
+            }
+        }
+
+        if (guideLines.length > 0) {
+            ctx.save();
+            ctx.strokeStyle = '#ff4d4d';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 3]);
+            for (const g of guideLines) {
+                ctx.beginPath();
+                if (g.axis === 'x') {
+                    const px = g.posMm * BASE_SCALE * zoomLevel;
+                    ctx.moveTo(px, (-minY - 5) * BASE_SCALE * zoomLevel);
+                    ctx.lineTo(px, (maxY + 5) * BASE_SCALE * zoomLevel);
+                } else {
+                    const py = g.posMm * BASE_SCALE * zoomLevel;
+                    ctx.moveTo((-minX - 5) * BASE_SCALE * zoomLevel, py);
+                    ctx.lineTo((maxX + 5) * BASE_SCALE * zoomLevel, py);
+                }
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+        ctx.restore();
+    }
+
+    function saveState() { return JSON.parse(JSON.stringify(keys)); }
+    function pushHistory() {
+        historyUndo.push(saveState());
+        if (historyUndo.length > MAX_HISTORY) historyUndo.shift();
+        historyRedo = [];
+        updateUndoButtons();
+    }
+    function undo() {
+        if (historyUndo.length === 0) return;
+        historyRedo.push(saveState());
+        keys = historyUndo.pop();
+        selectedKeyIds.clear();
+        updateDisplays();
+        drawCanvas();
+        updateUndoButtons();
+    }
+    function redo() {
+        if (historyRedo.length === 0) return;
+        historyUndo.push(saveState());
+        keys = historyRedo.pop();
+        selectedKeyIds.clear();
+        updateDisplays();
+        drawCanvas();
+        updateUndoButtons();
+    }
+    function updateUndoButtons() {
+        document.getElementById('undoBtn').disabled = historyUndo.length === 0;
+        document.getElementById('redoBtn').disabled = historyRedo.length === 0;
+    }
+
+    function getCorner(mmX, mmY, key) {
+        const threshold = 1.0;
+        const corners = [
+            { x: key.x, y: key.y, corner: 'tl' },
+            { x: key.x + key.w, y: key.y, corner: 'tr' },
+            { x: key.x, y: key.y + key.h, corner: 'bl' },
+            { x: key.x + key.w, y: key.y + key.h, corner: 'br' }
+        ];
+        for (const c of corners) {
+            if (Math.abs(mmX - c.x) < threshold && Math.abs(mmY - c.y) < threshold) return c.corner;
+        }
+        return null;
+    }
+
+    canvas.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        const { mmX, mmY } = mouseToMm(e.clientX, e.clientY);
+        const keyId = findKeyByMm(mmX, mmY);
+        const shiftKey = e.shiftKey;
+
+        if (keyId === null) {
+            if (!shiftKey) { selectedKeyIds.clear(); updateDisplays(); drawCanvas(); }
+            return;
+        }
+
+        const key = keys.find(k => k.id === keyId);
+        if (!key) return;
+
+        if (shiftKey) {
+            if (selectedKeyIds.has(keyId)) selectedKeyIds.delete(keyId);
+            else selectedKeyIds.add(keyId);
+            updateDisplays();
+            drawCanvas();
+            return;
+        }
+
+        if (!selectedKeyIds.has(keyId)) { selectedKeyIds.clear(); selectedKeyIds.add(keyId); }
+        updateDisplays();
+        pushHistory();
+
+        if (selectedKeyIds.size === 1) {
+            const corner = getCorner(mmX, mmY, key);
+            if (corner) {
+                dragInfo = {
+                    type: 'resize', corner,
+                    startMm: { x: mmX, y: mmY },
+                    startKey: { x: key.x, y: key.y, w: key.w, h: key.h },
+                    keyId
+                };
+                hasMoved = false;
+                e.preventDefault(); e.stopPropagation();
+                return;
+            }
+        }
+
+        const selectedKeys = keys.filter(k => selectedKeyIds.has(k.id));
+        dragInfo = {
+            type: 'move',
+            startMm: { x: mmX, y: mmY },
+            startKeys: selectedKeys.map(k => ({ id: k.id, x: k.x, y: k.y })),
+        };
+        hasMoved = false;
+        e.preventDefault(); e.stopPropagation();
+    });
+
+    window.addEventListener('mousemove', e => {
+        if (!dragInfo) return;
+        const { mmX, mmY } = mouseToMm(e.clientX, e.clientY);
+        const dx = mmX - dragInfo.startMm.x;
+        const dy = mmY - dragInfo.startMm.y;
+
+        if (dragInfo.type === 'move') {
+            const selectedKeys = keys.filter(k => selectedKeyIds.has(k.id));
+            for (const key of selectedKeys) {
+                const startKey = dragInfo.startKeys.find(sk => sk.id === key.id);
+                if (!startKey) continue;
+                let newX = startKey.x + dx;
+                let newY = startKey.y + dy;
+                const snapped = snapToGridXY(newX, newY);
+                newX = snapped.x; newY = snapped.y;
+                if (snapToObjects && key === selectedKeys[0]) {
+                    const snapRes = computeSnapGuides(key, newX, newY);
+                    key.x = snapRes.finalX;
+                    key.y = snapRes.finalY;
+                    guideLines = snapRes.guides;
+                } else {
+                    key.x = newX; key.y = newY;
+                }
+            }
+            hasMoved = true;
+        } else if (dragInfo.type === 'resize') {
+            const key = keys.find(k => k.id === dragInfo.keyId);
+            if (!key) return;
+            let newX = dragInfo.startKey.x, newY = dragInfo.startKey.y;
+            let newW = dragInfo.startKey.w, newH = dragInfo.startKey.h;
+            const c = dragInfo.corner;
+            if (c === 'tl') { newX += dx; newY += dy; newW -= dx; newH -= dy; }
+            else if (c === 'tr') { newY += dy; newW += dx; newH -= dy; }
+            else if (c === 'bl') { newX += dx; newW -= dx; newH += dy; }
+            else if (c === 'br') { newW += dx; newH += dy; }
+            const snappedPos = snapToGridXY(newX, newY);
+            const snappedSize = snapSizeToGrid(newW, newH);
+            newX = snappedPos.x; newY = snappedPos.y;
+            newW = snappedSize.w; newH = snappedSize.h;
+            if (snapToObjects) {
+                const tempKey = { id: key.id, w: newW, h: newH };
+                const snapRes = computeSnapGuides(tempKey, newX, newY);
+                key.x = snapRes.finalX; key.y = snapRes.finalY;
+                key.w = newW; key.h = newH;
+                guideLines = snapRes.guides;
+            } else {
+                key.x = newX; key.y = newY; key.w = newW; key.h = newH;
+                guideLines = [];
+            }
+            hasMoved = true;
+        }
+        drawCanvas();
+    });
+
+    window.addEventListener('mouseup', e => {
+        if (dragInfo) { guideLines = []; dragInfo = null; drawCanvas(); updateDisplays(); }
+    });
+
+    canvas.addEventListener('click', e => {
+        if (hasMoved) { hasMoved = false; return; }
+        if (addingKey || addingSpacer) {
+            const { mmX, mmY } = mouseToMm(e.clientX, e.clientY);
+            let keyX = mmX - newKeyWidthMM / 2;
+            let keyY = mmY - newKeyHeightMM / 2;
+            const snapped = snapToGridXY(keyX, keyY);
+            keyX = snapped.x; keyY = snapped.y;
+            pushHistory();
+            const newId = addingSpacer ? generateNewSpacerId() : generateNewKeyId();
+            keys.push({ id: newId, x: keyX, y: keyY, w: newKeyWidthMM, h: newKeyHeightMM, isSpacer: addingSpacer });
+            addingKey = false;
+            addingSpacer = false;
+            document.getElementById('addKeyBtn').textContent = 'Добавить клавишу (N)';
+            document.getElementById('addSpacerBtn').style.display = 'none';
+            drawCanvas();
+        }
+    });
+
+    function setZoom(newZoom) {
+        zoomLevel = Math.min(5, Math.max(0.2, newZoom));
+        document.getElementById('zoomValue').textContent = Math.round(zoomLevel * 100) + '%';
+        drawCanvas();
+    }
+    document.getElementById('zoomIn').addEventListener('click', () => setZoom(zoomLevel + 0.1));
+    document.getElementById('zoomOut').addEventListener('click', () => setZoom(zoomLevel - 0.1));
+    canvas.addEventListener('wheel', e => { e.preventDefault(); setZoom(zoomLevel + (e.deltaY > 0 ? -0.1 : 0.1)); });
+
+    window.addEventListener('keydown', e => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+
+        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+            const spacerPresets = {
+                '1': { w: 2, h: 19.05 },
+                '2': { w: 5, h: 19.05 },
+                '3': { w: 7, h: 19.05 },
+                '4': { w: 8, h: 19.05 },
+                '5': { w: 13, h: 19.05 },
+                '6': { w: 3.5, h: 19.05 },
+                '0': { custom: true }
+            };
+            if (e.key in spacerPresets) {
+                e.preventDefault();
+                const preset = spacerPresets[e.key];
+                if (preset.custom) {
+                    document.getElementById('customSpacerSize').style.display = 'block';
+                } else {
+                    startSpacerMode(preset.w, preset.h);
+                }
+                return;
+            }
+            if (e.key === 'g' || e.key === 'G') {
+                e.preventDefault();
+                document.getElementById('gridToggle').click();
+                return;
+            }
+            if (e.key === 'h' || e.key === 'H') {
+                e.preventDefault();
+                document.getElementById('snapGridToggle').click();
+                return;
+            }
+        }
+
+        if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+            if (selectedKeyIds.size === 0) return;
+            e.preventDefault();
+            const stepX = (snapToGrid && gridStepXMM > 0) ? gridStepXMM : 1;
+            const stepY = (snapToGrid && gridStepYMM > 0) ? gridStepYMM : 1;
+            const selectedKeys = keys.filter(k => selectedKeyIds.has(k.id));
+            pushHistory();
+            for (const key of selectedKeys) {
+                if (e.key === 'ArrowLeft') key.x -= stepX;
+                if (e.key === 'ArrowRight') key.x += stepX;
+                if (e.key === 'ArrowUp') key.y -= stepY;
+                if (e.key === 'ArrowDown') key.y += stepY;
+            }
+            updateDisplays(); drawCanvas();
+            return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+            e.preventDefault();
+            const selectedKeys = keys.filter(k => selectedKeyIds.has(k.id));
+            if (selectedKeys.length === 0) return;
+            clipboard = selectedKeys.map(k => ({ ...k }));
+            return;
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+            e.preventDefault();
+            if (clipboard.length === 0) return;
+            pushHistory();
+            const offsetX = gridStepXMM > 0 ? gridStepXMM : 2;
+            const offsetY = gridStepYMM > 0 ? gridStepYMM : 2;
+            const newKeys = clipboard.map(k => ({
+                ...k,
+                id: k.isSpacer ? generateNewSpacerId() : generateNewKeyId(),
+                x: k.x + offsetX,
+                y: k.y + offsetY,
+            }));
+            keys.push(...newKeys);
+            selectedKeyIds.clear();
+            newKeys.forEach(nk => selectedKeyIds.add(nk.id));
+            updateDisplays(); drawCanvas();
+            return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); return; }
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return; }
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); document.getElementById('saveLayoutBtn').click(); return; }
+        if (e.key === 'n' || e.key === 'N') { e.preventDefault(); document.getElementById('addKeyBtn').click(); return; }
+        if (e.key === 'Delete') {
+            e.preventDefault();
+            if (selectedKeyIds.size > 0) {
+                pushHistory();
+                keys = keys.filter(k => !selectedKeyIds.has(k.id));
+                selectedKeyIds.clear();
+                updateDisplays(); drawCanvas();
+            }
+            return;
+        }
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            if (addingKey || addingSpacer) {
+                addingKey = false; addingSpacer = false;
+                document.getElementById('addKeyBtn').textContent = 'Добавить клавишу (N)';
+                document.getElementById('addSpacerBtn').style.display = 'none';
+            }
+            selectedKeyIds.clear();
+            updateDisplays(); drawCanvas();
+        }
+    });
+
+    function updateDisplays() {
+        const selectedKeys = keys.filter(k => selectedKeyIds.has(k.id));
+        const infoEl = document.getElementById('selectionInfo');
+        if (selectedKeys.length === 0) {
+            infoEl.textContent = 'Нет выделения';
+            document.getElementById('editKeyX').value = '';
+            document.getElementById('editKeyY').value = '';
+            document.getElementById('editKeyW').value = '';
+            document.getElementById('editKeyH').value = '';
+            document.getElementById('deleteSelectedKeyBtn').disabled = true;
+        } else if (selectedKeys.length === 1) {
+            const key = selectedKeys[0];
+            infoEl.textContent = (key.isSpacer ? 'Отступ' : `Клавиша #${key.id}`);
+            document.getElementById('editKeyX').value = key.x.toFixed(1);
+            document.getElementById('editKeyY').value = key.y.toFixed(1);
+            document.getElementById('editKeyW').value = key.w.toFixed(1);
+            document.getElementById('editKeyH').value = key.h.toFixed(1);
+            document.getElementById('deleteSelectedKeyBtn').disabled = false;
+        } else {
+            infoEl.textContent = `Выделено: ${selectedKeys.length}`;
+            document.getElementById('editKeyX').value = '';
+            document.getElementById('editKeyY').value = '';
+            document.getElementById('editKeyW').value = '';
+            document.getElementById('editKeyH').value = '';
+            document.getElementById('deleteSelectedKeyBtn').disabled = false;
+        }
+    }
+
+    document.getElementById('addKeyBtn').addEventListener('click', () => {
+        addingKey = !addingKey;
+        addingSpacer = false;
+        document.getElementById('addSpacerBtn').style.display = 'none';
+        newKeyWidthMM = parseFloat(document.getElementById('newKeyWidth').value);
+        newKeyHeightMM = parseFloat(document.getElementById('newKeyHeight').value);
+        document.getElementById('addKeyBtn').textContent = addingKey ? 'Кликните на поле...' : 'Добавить клавишу (N)';
+    });
+
+    function startSpacerMode(wMM, hMM) {
+        addingSpacer = true;
+        addingKey = false;
+        newKeyWidthMM = wMM;
+        newKeyHeightMM = hMM;
+        document.getElementById('addSpacerBtn').style.display = 'inline-block';
+        document.getElementById('addSpacerBtn').textContent = 'Кликните на поле для отступа';
+        document.getElementById('addKeyBtn').textContent = 'Добавить клавишу (N)';
+        document.getElementById('customSpacerSize').style.display = 'none';
+    }
+
+    document.querySelectorAll('.spacer-preset').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const w = btn.getAttribute('data-w');
+            const h = btn.getAttribute('data-h');
+            if (w === 'custom' && h === 'custom') {
+                document.getElementById('customSpacerSize').style.display = 'block';
+                return;
+            }
+            startSpacerMode(parseFloat(w), parseFloat(h));
+        });
+    });
+    document.getElementById('applyCustomSpacer').addEventListener('click', () => {
+        const w = parseFloat(document.getElementById('customSpacerWidth').value);
+        const h = parseFloat(document.getElementById('customSpacerHeight').value);
+        if (isNaN(w) || isNaN(h) || w <= 0 || h <= 0) { alert('Введите корректные размеры'); return; }
+        startSpacerMode(w, h);
+    });
+    document.getElementById('addSpacerBtn').addEventListener('click', () => {
+        addingSpacer = false;
+        document.getElementById('addSpacerBtn').style.display = 'none';
+    });
+
+    document.getElementById('loadBgImageBtn').addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = ev => {
+                const img = new Image();
+                img.onload = () => { bgImage = img; document.getElementById('clearBgImageBtn').disabled = false; drawCanvas(); };
+                img.src = ev.target.result;
+            };
+            reader.readAsDataURL(file);
+        };
+        input.click();
+    });
+    document.getElementById('clearBgImageBtn').addEventListener('click', () => { bgImage = null; document.getElementById('clearBgImageBtn').disabled = true; drawCanvas(); });
+    document.getElementById('bgOpacity').addEventListener('input', function() { bgImageOpacity = parseInt(this.value) / 100; document.getElementById('bgOpacityVal').textContent = this.value + '%'; drawCanvas(); });
+
+    document.getElementById('gridToggle').addEventListener('change', function() { showGrid = this.checked; drawCanvas(); });
+    document.getElementById('gridStepX').addEventListener('input', function() { gridStepXMM = parseFloat(this.value) || 19.05; if (gridStepXMM <= 0) gridStepXMM = 1; drawCanvas(); });
+    document.getElementById('gridStepY').addEventListener('input', function() { gridStepYMM = parseFloat(this.value) || 19.05; if (gridStepYMM <= 0) gridStepYMM = 1; drawCanvas(); });
+    document.getElementById('snapGridToggle').addEventListener('change', function() { snapToGrid = this.checked; });
+    document.getElementById('snapObjToggle').addEventListener('change', function() { snapToObjects = this.checked; });
+    document.getElementById('snapThreshold').addEventListener('input', function() { snapThresholdMM = parseFloat(this.value) || 1.5; });
+
+    document.getElementById('applyKeyEdit').addEventListener('click', () => {
+        const selectedKeys = keys.filter(k => selectedKeyIds.has(k.id));
+        if (selectedKeys.length !== 1) return;
+        const key = selectedKeys[0];
+        pushHistory();
+        key.x = parseFloat(document.getElementById('editKeyX').value) || key.x;
+        key.y = parseFloat(document.getElementById('editKeyY').value) || key.y;
+        key.w = parseFloat(document.getElementById('editKeyW').value) || key.w;
+        key.h = parseFloat(document.getElementById('editKeyH').value) || key.h;
+        drawCanvas();
+    });
+    document.getElementById('deleteSelectedKeyBtn').addEventListener('click', () => {
+        if (selectedKeyIds.size === 0) return;
+        pushHistory();
+        keys = keys.filter(k => !selectedKeyIds.has(k.id));
+        selectedKeyIds.clear();
+        updateDisplays(); drawCanvas();
+    });
+
+    document.getElementById('undoBtn').addEventListener('click', undo);
+    document.getElementById('redoBtn').addEventListener('click', redo);
+
+    async function loadLayoutList() {
+        const resp = await fetch('/api/layouts');
+        const names = await resp.json();
+        const select = document.getElementById('savedLayoutsSelect');
+        select.innerHTML = '<option>-- выберите --</option>';
+        names.forEach(name => { const opt = document.createElement('option'); opt.value = name; opt.textContent = name; select.appendChild(opt); });
+    }
+    document.getElementById('saveLayoutBtn').addEventListener('click', async () => {
+        const name = prompt('Название раскладки:'); if (!name) return;
+        const payload = { keys: keys.map(k => ({ id: k.id, x: k.x, y: k.y, w: k.w, h: k.h, isSpacer: k.isSpacer || false })) };
+        await fetch('/api/layouts/' + name, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+        alert('Сохранено'); loadLayoutList();
+    });
+    document.getElementById('loadLayoutBtn').addEventListener('click', async () => {
+        const select = document.getElementById('savedLayoutsSelect');
+        const name = select.value;
+        if (!name || name === '-- выберите --') return;
+        const resp = await fetch('/api/layouts/' + name);
+        const data = await resp.json();
+        if (data.keys) {
+            keys = data.keys.map(k => ({ ...k, isSpacer: k.isSpacer || false }));
+            normalizeSpacerIds();
+            selectedKeyIds.clear();
+            historyUndo = []; historyRedo = [];
+            updateUndoButtons(); updateDisplays(); drawCanvas();
+        }
+    });
+
+    if (!CanvasRenderingContext2D.prototype.roundRect) {
+        CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+            if (typeof r === 'number') r = { tl: r, tr: r, br: r, bl: r };
+            this.moveTo(x + r.tl, y); this.lineTo(x + w - r.tr, y); this.quadraticCurveTo(x + w, y, x + w, y + r.tr);
+            this.lineTo(x + w, y + h - r.br); this.quadraticCurveTo(x + w, y + h, x + w - r.br, y + h);
+            this.lineTo(x + r.bl, y + h); this.quadraticCurveTo(x, y + h, x, y + h - r.bl);
+            this.lineTo(x, y + r.tl); this.quadraticCurveTo(x, y, x + r.tl, y);
+        };
+    }
+
+    loadLayoutList();
+    drawCanvas();
+    updateUndoButtons();
+</script>
+</body>
+</html>
